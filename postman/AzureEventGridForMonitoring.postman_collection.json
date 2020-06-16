@@ -1,0 +1,38 @@
+{
+	"info": {
+		"_postman_id": "ace9a63f-1e84-494e-bb46-c5c1e3ec5287",
+		"name": "AzureEventGridForMonitoring",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "POST simple message",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "{\"Text\":\"My First Message\",\"MessageType\":0}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "https://localhost:44350/message",
+					"protocol": "https",
+					"host": [
+						"localhost"
+					],
+					"port": "44350",
+					"path": [
+						"message"
+					]
+				}
+			},
+			"response": []
+		}
+	],
+	"protocolProfileBehavior": {}
+}
