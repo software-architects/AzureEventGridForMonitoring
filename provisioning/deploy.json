@@ -1,0 +1,465 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "serviceBusSku": {
+      "type": "string",
+      "allowedValues": [
+        "Basic",
+        "Standard",
+        "Premium"
+      ],
+      "defaultValue": "Standard",
+      "metadata": {
+        "description": "The messaging tier for service Bus namespace"
+      }
+    },
+    "productName": {
+      "type": "string"
+    },
+    "stage": {
+      "type": "string"
+    },
+    "tenantId": {
+      "type": "string"
+    },
+    "topicName": {
+      "type": "string"
+    },
+    "subscriptionName": {
+      "type": "string"
+    }
+  },
+  "variables": {
+    "hostingPlanName": "[concat(parameters('stage'), '-', 'plan', '-', parameters('productName'))]",
+    "webAppName": "[concat(parameters('stage'), '-', 'app', '-', parameters('productName'))]",
+    "dlqEventGridSystemTopicName": "[concat(parameters('stage'), '-', 'egst', '-', 'dlq', '-',parameters('productName'))]",
+    "blobCreatedEventGridSystemTopicName": "[concat(parameters('stage'), '-', 'egst', '-', 'blobcreated', '-',parameters('productName'))]",
+    "customEventGridTopicName": "[concat(parameters('stage'), '-', 'egst', '-', 'ticketcreated', '-',parameters('productName'))]",
+    "dlqFunctionName": "[concat(parameters('stage'), '-', 'func', '-', 'dlqhandler', '-', parameters('productName'))]",
+    "storageEventFunctionName": "[concat(parameters('stage'), '-', 'func', '-', 'sthandler', '-', parameters('productName'))]",
+    "customEventFunctionName": "[concat(parameters('stage'), '-', 'func', '-', 'customhandler', '-', parameters('productName'))]",
+    "sendGridAccountName": "[concat(parameters('stage'), '-', 'sg', '-', parameters('productName'))]",
+    "storageAccountName": "[concat(parameters('stage'), 'st', parameters('productName'))]",
+    "serviceBusNamespaceName": "[concat(parameters('stage'), '-', 'sb', '-', parameters('productName'))]",
+    "applicationInsightsName": "[concat(parameters('stage'), '-', 'appi', '-', parameters('productName'))]",
+    "defaultSASKeyName": "RootManageSharedAccessKey",
+    "defaultAuthRuleResourceId": "[resourceId('Microsoft.ServiceBus/namespaces/authorizationRules', variables('serviceBusNamespaceName'), variables('defaultSASKeyName'))]",
+    "sbVersion": "2017-04-01"
+  },
+  "resources": [
+    {
+      "name": "[variables('storageAccountName')]",
+      "type": "Microsoft.Storage/storageAccounts",
+      "apiVersion": "2019-06-01",
+      "tags": {
+        "displayName": "[variables('storageAccountName')]"
+      },
+      "location": "[resourceGroup().location]",
+      "kind": "StorageV2",
+      "sku": {
+        "name": "Standard_LRS",
+        "tier": "Standard"
+      },
+      "resources": [
+        {
+          "name": "[concat('default/', 'upload')]",
+          "type": "blobServices/containers",
+          "apiVersion": "2019-06-01",
+          "dependsOn": [
+            "[variables('storageAccountName')]"
+          ]
+        },
+        {
+          "name": "[concat('default/', 'events')]",
+          "type": "blobServices/containers",
+          "apiVersion": "2019-06-01",
+          "dependsOn": [
+            "[variables('storageAccountName')]"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "[variables('sendGridAccountName')]",
+      "type": "Sendgrid.Email/accounts",
+      "location": "[resourceGroup().location]",
+      "apiVersion": "2015-01-01",
+      "plan": {
+        "name": "free",
+        "publisher": "Sendgrid",
+        "product": "sendgrid_azure",
+        "promotionCode": ""
+      },
+      "properties": {
+        "password": "Test123*",
+        "acceptMarketingEmails": "0",
+        "email": ""
+      }
+    },
+    {
+      "apiVersion": "2018-02-01",
+      "name": "[variables('hostingPlanName')]",
+      "type": "Microsoft.Web/serverfarms",
+      "location": "[resourceGroup().location]",
+
+      "tags": {
+        "displayName": "[variables('hostingPlanName')]"
+      },
+      "sku": {
+        "name": "B1"
+      },
+      "properties": {
+        "name": "[variables('hostingPlanName')]"
+      }
+    },
+    {
+      "name": "[variables('dlqFunctionName')]",
+      "type": "Microsoft.Web/sites",
+      "apiVersion": "2018-11-01",
+      "location": "[resourceGroup().location]",
+      "kind": "functionapp",
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/serverfarms/', variables('hostingPlanName'))]",
+        "[resourceId('Microsoft.Storage/storageAccounts/', variables('storageAccountName'))]"
+      ],
+      "properties": {
+        "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', variables('hostingPlanName'))]",
+        "siteConfig": {
+          "alwaysOn": true,
+          "appSettings": [
+            {
+              "name": "AzureWebJobsDashboard",
+              "value": "[concat('DefaultEndpointsProtocol=https;AccountName=', variables('storageAccountName'), ';AccountKey=', listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName')),'2015-05-01-preview').key1)]"
+            },
+            {
+              "name": "AzureWebJobsStorage",
+              "value": "[concat('DefaultEndpointsProtocol=https;AccountName=', variables('storageAccountName'), ';AccountKey=', listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName')),'2015-05-01-preview').key1)]"
+            },
+            {
+              "name": "FUNCTIONS_EXTENSION_VERSION",
+              "value": "~2"
+            },
+            {
+              "name": "APPINSIGHTS_INSTRUMENTATIONKEY",
+              "value": "[reference(resourceId('microsoft.insights/components/', variables('applicationInsightsName')), '2015-05-01').InstrumentationKey]"
+            },
+            {
+              "name": "FUNCTIONS_WORKER_RUNTIME",
+              "value": "dotnet"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "[variables('storageEventFunctionName')]",
+      "type": "Microsoft.Web/sites",
+      "apiVersion": "2018-11-01",
+      "location": "[resourceGroup().location]",
+      "kind": "functionapp",
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/serverfarms/', variables('hostingPlanName'))]",
+        "[resourceId('Microsoft.Storage/storageAccounts/', variables('storageAccountName'))]"
+      ],
+      "properties": {
+        "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', variables('hostingPlanName'))]",
+        "alwaysOn": true,
+        "siteConfig": {
+          "appSettings": [
+            {
+              "name": "AzureWebJobsDashboard",
+              "value": "[concat('DefaultEndpointsProtocol=https;AccountName=', variables('storageAccountName'), ';AccountKey=', listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName')),'2015-05-01-preview').key1)]"
+            },
+            {
+              "name": "AzureWebJobsStorage",
+              "value": "[concat('DefaultEndpointsProtocol=https;AccountName=', variables('storageAccountName'), ';AccountKey=', listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName')),'2015-05-01-preview').key1)]"
+            },
+            {
+              "name": "FUNCTIONS_EXTENSION_VERSION",
+              "value": "~2"
+            },
+            {
+              "name": "APPINSIGHTS_INSTRUMENTATIONKEY",
+              "value": "[reference(resourceId('microsoft.insights/components/', variables('applicationInsightsName')), '2015-05-01').InstrumentationKey]"
+            },
+            {
+              "name": "FUNCTIONS_WORKER_RUNTIME",
+              "value": "dotnet"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "[variables('customEventFunctionName')]",
+      "type": "Microsoft.Web/sites",
+      "apiVersion": "2018-11-01",
+      "location": "[resourceGroup().location]",
+      "kind": "functionapp",
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/serverfarms/', variables('hostingPlanName'))]",
+        "[resourceId('Microsoft.Storage/storageAccounts/', variables('storageAccountName'))]"
+      ],
+      "properties": {
+        "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', variables('hostingPlanName'))]",
+        "alwaysOn": true,
+        "siteConfig": {
+          "appSettings": [
+            {
+              "name": "AzureWebJobsDashboard",
+              "value": "[concat('DefaultEndpointsProtocol=https;AccountName=', variables('storageAccountName'), ';AccountKey=', listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName')),'2015-05-01-preview').key1)]"
+            },
+            {
+              "name": "AzureWebJobsStorage",
+              "value": "[concat('DefaultEndpointsProtocol=https;AccountName=', variables('storageAccountName'), ';AccountKey=', listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName')),'2015-05-01-preview').key1)]"
+            },
+            {
+              "name": "FUNCTIONS_EXTENSION_VERSION",
+              "value": "~2"
+            },
+            {
+              "name": "APPINSIGHTS_INSTRUMENTATIONKEY",
+              "value": "[reference(resourceId('microsoft.insights/components/', variables('applicationInsightsName')), '2015-05-01').InstrumentationKey]"
+            },
+            {
+              "name": "SendgridSmtpServer",
+              "value": "[reference(resourceId('Sendgrid.Email/accounts', variables('sendgridAccountName'))).smtpServer]"
+            },
+            {
+              "name": "SendgridApiKey",
+              "value": ""
+            },
+            {
+              "name": "FUNCTIONS_WORKER_RUNTIME",
+              "value": "dotnet"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "apiVersion": "2018-11-01",
+      "name": "[variables('webAppName')]",
+      "type": "Microsoft.Web/sites",
+      "location": "[resourceGroup().location]",
+      "identity": {
+        "type": "SystemAssigned"
+      },
+      "tags": {
+        "[concat('hidden-related:', resourceGroup().id, '/providers/Microsoft.Web/serverfarms/', variables('hostingPlanName'))]": "Resource",
+        "displayName": "[variables('webAppName')]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/serverfarms/', variables('hostingPlanName'))]"
+      ],
+      "properties": {
+        "name": "[variables('webAppName')]",
+        "httpsOnly": true,
+        "siteConfig": {
+          "appSettings": [
+            {
+              "name": "APPINSIGHTS_INSTRUMENTATIONKEY",
+              "value": "[reference(concat('Microsoft.Insights/components/', variables('applicationInsightsName'))).InstrumentationKey]"
+            },
+            {
+              "name": "ApplicationInsightsAgent_EXTENSION_VERSION",
+              "value": "~2"
+            }
+          ]
+        },
+        "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', variables('hostingPlanName'))]"
+      }
+    },
+    {
+      "apiVersion": "2014-04-01",
+      "name": "[variables('applicationInsightsName')]",
+      "type": "Microsoft.Insights/components",
+      "location": "[resourceGroup().location]",
+      "tags": {
+        "[concat('hidden-link:', resourceGroup().id, '/providers/Microsoft.Web/sites/', variables('webAppName'))]": "Resource",
+        "displayName": "[variables('applicationInsightsName')]"
+      },
+      "properties": {
+        "applicationId": "[variables('webAppName')]"
+      }
+    },
+    {
+      "apiVersion": "2017-04-01",
+      "name": "[variables('serviceBusNamespaceName')]",
+      "type": "Microsoft.ServiceBus/namespaces",
+      "location": "[resourceGroup().location]",
+      "sku": {
+        "name": "Premium"
+      },
+      "resources": [
+        {
+          "apiVersion": "2017-04-01",
+          "name": "[parameters('topicName')]",
+          "type": "Topics",
+          "dependsOn": [
+            "[concat('Microsoft.ServiceBus/namespaces/', variables('serviceBusNamespaceName'))]"
+          ],
+          "properties": {
+            "path": "[parameters('topicName')]"
+          },
+          "resources": [
+            {
+              "apiVersion": "[variables('sbVersion')]",
+              "name": "Send",
+              "type": "authorizationRules",
+              "dependsOn": [
+                "[parameters('topicName')]"
+              ],
+              "properties": {
+                "Rights": [
+                  "Send"
+                ]
+              }
+            },
+            {
+              "apiVersion": "[variables('sbVersion')]",
+              "name": "Listen",
+              "type": "authorizationRules",
+              "dependsOn": [
+                "[parameters('topicName')]"
+              ],
+              "properties": {
+                "Rights": [
+                  "Listen"
+                ]
+              }
+            },
+            {
+              "apiVersion": "2017-04-01",
+              "name": "[parameters('subscriptionName')]",
+              "type": "Subscriptions",
+              "dependsOn": [
+                "[parameters('topicName')]"
+              ],
+              "properties": {
+              },
+              "resources": [
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "Microsoft.EventGrid/systemTopics",
+      "apiVersion": "2020-04-01-preview",
+      "name": "[variables('dlqEventGridSystemTopicName')]",
+      "location": "westeurope",
+      "properties": {
+        "source": "[resourceId('Microsoft.ServiceBus/namespaces/', variables('serviceBusNamespaceName'))]",
+        "topicType": "Microsoft.ServiceBus.Namespaces"
+      }
+    },
+    {
+      "type": "Microsoft.EventGrid/systemTopics/eventSubscriptions",
+      "apiVersion": "2020-04-01-preview",
+      "name": "[concat(variables('dlqEventGridSystemTopicName'), '/', 'subscription')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.EventGrid/systemTopics', variables('dlqEventGridSystemTopicName'))]"
+      ],
+      "properties": {
+        "destination": {
+          "properties": {
+            "resourceId": "[concat(resourceId('Microsoft.Web/sites/', variables('dlqFunctionName')), '/functions/DlqMessageHandler')]",
+            "maxEventsPerBatch": 1,
+            "preferredBatchSizeInKilobytes": 64
+          },
+          "endpointType": "AzureFunction"
+        },
+        "filter": {
+          "includedEventTypes": [
+            "Microsoft.ServiceBus.ActiveMessagesAvailableWithNoListeners",
+            "Microsoft.ServiceBus.DeadLetterMessagesAvailableWithNoListeners"
+          ]
+        },
+        "labels": [
+        ],
+        "eventDeliverySchema": "EventGridSchema",
+        "retryPolicy": {
+          "maxDeliveryAttempts": 30,
+          "eventTimeToLiveInMinutes": 1440
+        }
+      }
+    },
+    {
+      "type": "Microsoft.EventGrid/systemTopics",
+      "apiVersion": "2020-04-01-preview",
+      "name": "[variables('blobCreatedEventGridSystemTopicName')]",
+      "location": "westeurope",
+      "properties": {
+        "source": "[resourceId('Microsoft.Storage/storageAccounts/', variables('storageAccountName'))]",
+        "topicType": "Microsoft.Storage.StorageAccounts"
+      }
+    },
+    {
+      "type": "Microsoft.EventGrid/systemTopics/eventSubscriptions",
+      "apiVersion": "2020-04-01-preview",
+      "name": "[concat(variables('blobCreatedEventGridSystemTopicName'), '/', 'subscription')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.EventGrid/systemTopics', variables('blobCreatedEventGridSystemTopicName'))]"
+      ],
+      "properties": {
+        "destination": {
+          "properties": {
+            "resourceId": "[concat(resourceId('Microsoft.Web/sites/', variables('storageEventFunctionName')), '/functions/StorageEventMessageHanlder')]",
+            "maxEventsPerBatch": 1,
+            "preferredBatchSizeInKilobytes": 64
+          },
+          "endpointType": "AzureFunction"
+        },
+        "filter": {
+          "includedEventTypes": [
+            "Microsoft.Storage.BlobCreated"
+          ]
+        },
+        "labels": [
+        ],
+        "eventDeliverySchema": "EventGridSchema",
+        "retryPolicy": {
+          "maxDeliveryAttempts": 30,
+          "eventTimeToLiveInMinutes": 1440
+        }
+      }
+    },
+    {
+      "type": "Microsoft.EventGrid/topics",
+      "apiVersion": "2018-01-01",
+      "name": "[variables('customEventGridTopicName')]",
+      "location": "westeurope"
+    },
+    {
+      "type": "Microsoft.EventGrid/topics/providers/eventSubscriptions",
+      "name": "[concat(variables('customEventGridTopicName'), '/Microsoft.EventGrid/', 'subscription')]",
+      "apiVersion": "2020-01-01-preview",
+      "dependsOn": [
+        "[resourceId('Microsoft.EventGrid/topics', variables('customEventGridTopicName'))]"
+      ],
+      "properties": {
+        "destination": {
+          "properties": {
+            "resourceId": "[resourceId('Microsoft.Web/sites/functions/', variables('customEventFunctionName'), 'EventConsumerFunction')]",
+            "maxEventsPerBatch": 1,
+            "preferredBatchSizeInKilobytes": 64
+          },
+          "endpointType": "AzureFunction"
+        }
+      }
+    }
+  ],
+  "outputs": {
+    "NamespaceDefaultConnectionString": {
+      "type": "string",
+      "value": "[listkeys(variables('defaultAuthRuleResourceId'), variables('sbVersion')).primaryConnectionString]"
+    },
+    "DefaultSharedAccessPolicyPrimaryKey": {
+      "type": "string",
+      "value": "[listkeys(variables('defaultAuthRuleResourceId'), variables('sbVersion')).primaryKey]"
+    }
+  }
+}

@@ -3,3 +3,17 @@
 ################################################################################
 
 /src/.vs/AzureEventGridForMonitoring
+/.vs
+/src/Consumer/bin/Debug/netcoreapp3.1
+/src/Consumer/obj
+/src/DlqHandlerFunctionApp/Properties/PublishProfiles
+/src/EventConsumerFunctionApp/Properties/PublishProfiles
+/src/EventPublisher/bin/Debug/netcoreapp3.1
+/src/EventPublisher/Properties
+/src/EventPublisher/obj
+/src/Model/bin/Debug/netstandard2.0
+/src/Model/obj
+/src/Producer/bin/Debug/netcoreapp3.1
+/src/Producer/obj
+/src/Producer/Properties
+/src/StorageHandlerFunctionApp/Properties/PublishProfiles

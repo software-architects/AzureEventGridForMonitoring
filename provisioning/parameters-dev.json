@@ -1,0 +1,21 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "productName": {
+      "value": "egmon"
+    },
+    "stage": {
+      "value": "dev"
+    },
+    "tenantId": {
+      "value": "70f564a8-40f6-4ecb-a4e6-50ab9e98d0e3"
+    },
+    "topicName": {
+      "value": "message-in"
+    },
+    "subscriptionName": {
+      "value": "message-in-subscription"
+    }
+  }
+}
